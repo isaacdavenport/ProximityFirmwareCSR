@@ -20,7 +20,7 @@ T2L  Toys to Life.  This program sets the CSR Radio to listen for other radios
 #include <bt_event_types.h>
 #include <pio.h> 
 
-#define CHARACTER_NUM 5
+#define CHARACTER_NUM 3
 
 #define BEACON_ADVERT_SIZE (16) /* use PACKET_SIZE now */
 #define TX_BUFF_SIZE 16
@@ -34,7 +34,7 @@ static uint16 app_timers[ SIZEOF_APP_TIMER * MAX_APP_TIMERS ];
 static void InitHeatMap(void);
 static void HandleTimer(timer_id tid);
 void SetRadioToListen(void);
-void SetRadioToAdvertise(void);
+void SetRadioToAdvertise(uint8 forceSeqIncrement);
 void SetRadioToIdle(void);
 void ProcessPacket(LM_EVENT_T *event_data);
 bool CopyArrayCheckIfDuplicate(uint8 *source, uint8 *dest, uint8 length);
@@ -128,6 +128,7 @@ static void HandleTimer(timer_id tid)
 {
     static uint8 state;
     static uint8 ledBlinkCount;
+    static uint8 forceNonDupeAdvCount;
     /* step through listen, transmit, and low power states */
     /* TODO why does it advertise for more than 7ms? */
     handleTimerCalls++;
@@ -140,7 +141,7 @@ static void HandleTimer(timer_id tid)
               break;
            case 2 :
               broadcast_tid = TimerCreate(7*MILLISECOND, TRUE, HandleTimer); 
-              SetRadioToAdvertise();
+              SetRadioToAdvertise(0);
               break;
            case 3 :
               broadcast_tid = TimerCreate(43*MILLISECOND, TRUE, HandleTimer); 
@@ -148,7 +149,7 @@ static void HandleTimer(timer_id tid)
               break;
            case 4 :
               broadcast_tid = TimerCreate(7*MILLISECOND, TRUE, HandleTimer); 
-              SetRadioToAdvertise();
+              SetRadioToAdvertise(0);
               break;
            case 5 :
               broadcast_tid = TimerCreate(43*MILLISECOND, TRUE, HandleTimer); 
@@ -156,7 +157,7 @@ static void HandleTimer(timer_id tid)
               break;
            case 6 :
               broadcast_tid = TimerCreate(7*MILLISECOND, TRUE, HandleTimer); 
-              SetRadioToAdvertise();
+              SetRadioToAdvertise(0);
               break;
            case 7 :
               broadcast_tid = TimerCreate(50*MILLISECOND, TRUE, HandleTimer); 
@@ -164,12 +165,17 @@ static void HandleTimer(timer_id tid)
               break;
            case 8 :
               broadcast_tid = TimerCreate(7*MILLISECOND, TRUE, HandleTimer); 
-              if (ledBlinkCount > 130)  {
+              if (ledBlinkCount > 150)  {
                  PioSet(LED_PIO, TRUE); 
                  ledBlinkCount = 0; 
                  SendSerialDebugVars();
               }     
-              SetRadioToAdvertise();
+              if (forceNonDupeAdvCount > 22) {
+                  forceNonDupeAdvCount = 0;
+                  SetRadioToAdvertise(1);  /* force sequence number update and transmit every second or so */                    
+              } else {
+                  SetRadioToAdvertise(0);
+              }
               break;
            default :
               PioSet(LED_PIO, FALSE); 
@@ -178,6 +184,7 @@ static void HandleTimer(timer_id tid)
         }        
         state++;
         ledBlinkCount++;
+        forceNonDupeAdvCount++;
         
     } else {
        AppDebugWriteString("Invalid Timer!!!!!");        
@@ -198,7 +205,7 @@ void SetRadioToListen()
     LsStartStopScan( TRUE, whitelist_disabled, ls_addr_type_public ); 
 }
 
-void SetRadioToAdvertise()
+void SetRadioToAdvertise(uint8 forceSeqIncrement)
 {
     bool isDupe = TRUE;
     uint8 i = 0;
@@ -206,7 +213,7 @@ void SetRadioToAdvertise()
     setRadioToAdvertiseCalls++;
     LsStartStopScan( FALSE, whitelist_disabled, ls_addr_type_public ); 
     isDupe = CopyArrayCheckIfDuplicate(advData, priorAdvData, PACKET_SIZE);
-    if (!isDupe) {
+    if (!isDupe || forceSeqIncrement > 0) {
         autoIncrement++;
         if (autoIncrement == 0xFF) autoIncrement++;  /* 0xFF is the tag for the transmitting character */
         advData[8] = autoIncrement;  /* put a rolling tag number on packets for packet tracking */
@@ -235,7 +242,7 @@ void AppInit(sleep_state last_sleep_state)
     DebugInit(1, uartRxDataCallback, NULL);
     AppDebugWriteString("T2L Character ");
     DebugWriteUint8(CHARACTER_NUM);             
-    AppDebugWriteString("  v2.50\r\n");
+    AppDebugWriteString("  v2.51\r\n");
     PioSetDir(LED_PIO, TRUE);  /* set LED pin as output */
     PioSet(LED_PIO, TRUE);  /* set LED pin to high */
     broadcast_tid = TimerCreate( 300*MILLISECOND, TRUE, HandleTimer);
